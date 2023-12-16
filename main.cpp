@@ -38,7 +38,7 @@ typedef struct ThreadInfo
  * Returns: Number of threads.
  *
  */
-int check_num_threads(int argc, char *argv[]);
+std::pair<std::vector<std::string>, int> check_num_threads(int argc, char *argv[]);
 
 /**
  * add_directory() - loops trough directory.
@@ -64,13 +64,13 @@ void thread_function(void *arg);
 /**
  * init_threads() - Initiates all the threads.
  *
- * @num_threads: Number of threads to initiate.
+ * @cmdArgs: Cointans files to measure and number of threads to init.
  * @threadInfo: Struct containing information for the threads.
  *
  * Returns: Nothing.
  *
  */
-void init_threads(int num_threads, int argc, char *argv[], ThreadInfo &threadInfo);
+void init_threads(std::pair<std::vector<std::string>, int>& cmdArgs, ThreadInfo &threadInfo);
 
 
 
@@ -80,32 +80,34 @@ int main(int argc, char *argv[])
 {
     // Init the threadInfo struct
     ThreadInfo threadInfo;
+
     // Get the number of threads to use
-    int num_threads = check_num_threads(argc, argv);
+    std::pair<std::vector<std::string>, int> cmdArgs{check_num_threads(argc, argv)};
     // Start threads
-    init_threads(num_threads, argc, argv, threadInfo);
+    init_threads(cmdArgs, threadInfo);
     // Check if an error occurred
     int exit_value = threadInfo.error;
 
     return exit_value;
 }
 
-void init_threads(int num_threads, int argc, char *argv[], ThreadInfo &threadInfo)
+void init_threads(std::pair<std::vector<std::string>, int>& cmdArgs, ThreadInfo &threadInfo)
 {
     namespace fs = std::filesystem;
 
     std::vector<std::thread> threads;
+    threads.reserve(cmdArgs.second); // Preallocate memory
 
     // Create threads
-    for (int t = 0; t < num_threads; ++t)
+    for (int t = 0; t < cmdArgs.second; ++t)
     {
         threads.emplace_back([&threadInfo]() { thread_function(&threadInfo); });
     }
 
     // Process directories
-    for (int i = optind; i < argc; ++i)
+    for (const auto& dir : cmdArgs.first)
     {
-        fs::path path(argv[i]);
+        fs::path path(dir);
         if (fs::exists(path) && fs::is_directory(path))
         {
             std::stack<std::string> newStack;
@@ -149,7 +151,7 @@ void init_threads(int num_threads, int argc, char *argv[], ThreadInfo &threadInf
 void thread_function(void *arg)
 {
     auto &threadInfo = *static_cast<ThreadInfo *>(arg);
-
+    // wait for work
     {
         std::unique_lock<std::mutex> lock(threadInfo.mutex);
         threadInfo.work_available.wait(lock);
@@ -162,21 +164,21 @@ void thread_function(void *arg)
         // Check if stack is empty and no thread is working
         while (threadInfo.stack.first.empty() && (threadInfo.process_count > 0))
         {
-            std::cout << "1 " << std::endl;
+            //std::cout << "1 " << std::endl;
             threadInfo.work_available.wait(lock);
 
         }
 
-        if(threadInfo.stack.first.empty() && threadInfo.no_more_work)
+        if(threadInfo.no_more_work)
         {
-            std::cout <<  "2 "<< std::endl;
+            //std::cout <<  "2 "<< std::endl;
             lock.unlock();
             return;
         }
 
         if (threadInfo.stack.first.empty())
         {
-            std::cout <<  "3 "<< std::endl;
+            //std::cout <<  "3 "<< std::endl;
             threadInfo.threads_complete.notify_one();
             // Wait for work_available
             threadInfo.work_available.wait(lock);
@@ -184,7 +186,7 @@ void thread_function(void *arg)
         }
         else
         {
-            std::cout <<  "5 "<< std::endl;
+            //std::cout <<  "5 "<< std::endl;
             std::string path = threadInfo.stack.first.top();
             threadInfo.stack.first.pop();
             threadInfo.process_count++;
@@ -254,29 +256,22 @@ int add_directory(ThreadInfo &threadInfo, const std::string &path)
     return error;
 }
 
-int check_num_threads(int argc, char *argv[])
+std::pair<std::vector<std::string>, int> check_num_threads(int argc, char *argv[])
 {
-    int num_threads = 1;
+    // Parse the number of threads
+    int numThreads = std::stoi(argv[2]);
+    std::cout << numThreads << '\n';
 
-    int opt;
-    while ((opt = getopt(argc, argv, "j:")) != -1)
+    // Store the remaining arguments in the vector
+    std::vector<std::string> files;
+    for (int i = 3; i < argc; ++i)
     {
-        switch (opt)
-        {
-            case 'j':
-                num_threads = std::stoi(optarg);
-                std::cout << "num_threads: " << num_threads << '\n';
-                break;
-        }
+        files.emplace_back(argv[i]);
+        std::cout << argv[i] << '\n';
     }
 
-    if (num_threads < 1)
-    {
-        std::cerr << "Error: Number of threads must be a positive number." << std::endl;
-        exit(EXIT_FAILURE);
-    }
-    else
-    {
-        return num_threads;
-    }
+    // Store the values in cmdArgs
+    std::pair<std::vector<std::string>, int> cmdArgs = {files, numThreads};
+
+    return cmdArgs;
 }
