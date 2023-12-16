@@ -258,17 +258,29 @@ int add_directory(ThreadInfo &threadInfo, const std::string &path)
 
 std::pair<std::vector<std::string>, int> check_num_threads(int argc, char *argv[])
 {
-    // Parse the number of threads
-    int numThreads = std::stoi(argv[2]);
-    std::cout << numThreads << '\n';
-
-    // Store the remaining arguments in the vector
+    int numThreads = 1; // Default to 1 thread
     std::vector<std::string> files;
-    for (int i = 3; i < argc; ++i)
+
+    // Check if the -j flag is provided and parse the number of threads and files
+    for (int i = 1; i < argc; i++)
     {
-        files.emplace_back(argv[i]);
-        std::cout << argv[i] << '\n';
+        if (std::string(argv[i]) == "-j")
+        {
+            std::cout << "Num threads: " << argv[i + 1] << '\n';
+            numThreads = std::stoi(argv[++i]);
+
+        }
+        else
+        {
+            files.emplace_back(argv[i]);
+            std::cout << "File: " << argv[i] << '\n';
+        }
+
     }
+
+    std::cout << "Number of threads: " << numThreads << '\n';
+
+
 
     // Store the values in cmdArgs
     std::pair<std::vector<std::string>, int> cmdArgs = {files, numThreads};
