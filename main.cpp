@@ -19,7 +19,7 @@
 // Struct for the threads to read from and write to
 typedef struct ThreadInfo
 {
-    std::vector<std::pair<std::stack<std::string>, size_t>> stack;
+    std::pair<std::stack<std::string>, std::uintmax_t> stack;
     int error{0};
     int process_count{0};
     bool no_more_work{false};
@@ -113,7 +113,7 @@ void init_threads(int num_threads, int argc, char *argv[], ThreadInfo &threadInf
 
             {
                 std::lock_guard<std::mutex> lock(threadInfo.mutex);
-                threadInfo.stack.emplace_back(newStack, 0);
+                threadInfo.stack.first = newStack;
                 // Signal to threads that work is available
                 threadInfo.work_available.notify_one();
             }
@@ -125,7 +125,7 @@ void init_threads(int num_threads, int argc, char *argv[], ThreadInfo &threadInf
             }
 
             // Print result
-            std::cout << threadInfo.stack.back().second << " " << path << '\n';
+            std::cout << threadInfo.stack.second << " " << path << '\n';
         }
         else
         {
@@ -150,38 +150,43 @@ void thread_function(void *arg)
 {
     auto &threadInfo = *static_cast<ThreadInfo *>(arg);
 
+    {
+        std::unique_lock<std::mutex> lock(threadInfo.mutex);
+        threadInfo.work_available.wait(lock);
+    }
+
     while (true)
     {
         std::unique_lock<std::mutex> lock(threadInfo.mutex);
 
         // Check if stack is empty and no thread is working
-        while (threadInfo.stack.empty() || (threadInfo.stack.back().first.empty() && (threadInfo.process_count > 0)))
+        while (threadInfo.stack.first.empty() && (threadInfo.process_count > 0))
         {
-            //std::cout <<  "1 "<< std::endl;
+            std::cout << "1 " << std::endl;
             threadInfo.work_available.wait(lock);
+
         }
 
-        if (threadInfo.stack.back().first.empty())
+        if(threadInfo.stack.first.empty() && threadInfo.no_more_work)
         {
-            //std::cout <<  "2 "<< std::endl;
+            std::cout <<  "2 "<< std::endl;
+            lock.unlock();
+            return;
+        }
+
+        if (threadInfo.stack.first.empty())
+        {
+            std::cout <<  "3 "<< std::endl;
             threadInfo.threads_complete.notify_one();
             // Wait for work_available
-            lock.unlock();
             threadInfo.work_available.wait(lock);
-
-            // Check if there is no more work after waiting
-            if (threadInfo.no_more_work)
-            {
-                // Exit if there is no more work
-                //std::cout <<  "3 "<< std::endl;
-                return;
-            }
+            lock.unlock();
         }
         else
         {
-            //std::cout <<  "4 "<< std::endl;
-            std::string path = threadInfo.stack.back().first.top();
-            threadInfo.stack.back().first.pop();
+            std::cout <<  "5 "<< std::endl;
+            std::string path = threadInfo.stack.first.top();
+            threadInfo.stack.first.pop();
             threadInfo.process_count++;
 
             lock.unlock();
@@ -210,13 +215,19 @@ int add_directory(ThreadInfo &threadInfo, const std::string &path)
 
     for (const auto &entry : fs::directory_iterator(path))
     {
+        if (fs::is_symlink(entry))
+        {
+            // Skip symbolic links
+            continue;
+        }
+
         if (entry.is_directory())
         {
             if (fs::exists(entry.path()) && (fs::status(entry.path()).permissions() & fs::perms::owner_read) != fs::perms::none)
             {
                 {
                     std::unique_lock<std::mutex> lock(threadInfo.mutex);
-                    threadInfo.stack.back().first.push(entry.path().string());
+                    threadInfo.stack.first.push(entry.path().string());
                     // Wake up one
                     threadInfo.work_available.notify_one();
                 }
@@ -224,7 +235,6 @@ int add_directory(ThreadInfo &threadInfo, const std::string &path)
             else
             {
                 std::cerr << "Cannot read directory '" << entry.path() << "': Permission denied\n";
-                size += fs::file_size(entry.path());
                 // Set error variable
                 error = 1;
             }
@@ -232,12 +242,13 @@ int add_directory(ThreadInfo &threadInfo, const std::string &path)
         else
         {
             size += fs::file_size(entry.path());
+            std::cout << "Path: " << entry.path() << " size: " << size << '\n';
         }
     }
 
     {
         std::unique_lock<std::mutex> lock(threadInfo.mutex);
-        threadInfo.stack.at(0).second += size;
+        threadInfo.stack.second += size;
     }
 
     return error;
