@@ -5,10 +5,10 @@
 #include <condition_variable>
 #include <thread>
 #include <filesystem>
-#include <unistd.h>
 
 /*
- * Implementation of mdu, Measure Disk Usage
+ * Implementation of mdu,
+ * a program that uses multithreading to measure disk usage.
  *
  * Author: Marcus Lundqvist.
  *
@@ -35,7 +35,7 @@ typedef struct ThreadInfo
  * @argc: Argument count.
  * @argv: Argument values.
  *
- * Returns: Number of threads.
+ * Returns: Number of threads to use and paths to measure.
  *
  */
 std::pair<std::vector<std::string>, int> check_num_threads(int argc, char *argv[]);
@@ -45,7 +45,7 @@ std::pair<std::vector<std::string>, int> check_num_threads(int argc, char *argv[
  * @threadInfo: Struct containing information for the threads.
  * @path: Path to directory
  *
- * Returns: 0 if sucessfull, 1 if error occured.
+ * Returns: 0 if successful, 1 if error occurred.
  *
  */
 int add_directory(ThreadInfo &threadInfo, const std::string& path);
@@ -54,7 +54,7 @@ int add_directory(ThreadInfo &threadInfo, const std::string& path);
  * threadFunction() - Function run by every thread.
  * Adds folder to stack to process and processes folders.
  *
- * @arg: Used to pass variables.
+ * @arg: Used to pass ThreadInfo struct.
  *
  * Returns: Nothing.
  *
@@ -64,7 +64,7 @@ void thread_function(void *arg);
 /**
  * init_threads() - Initiates all the threads.
  *
- * @cmdArgs: Cointans files to measure and number of threads to init.
+ * @cmdArgs: Contains files to measure and number of threads to init.
  * @threadInfo: Struct containing information for the threads.
  *
  * Returns: Nothing.
@@ -127,7 +127,7 @@ void init_threads(std::pair<std::vector<std::string>, int>& cmdArgs, ThreadInfo 
             }
 
             // Print result
-            std::cout << threadInfo.stack.second << " " << path << '\n';
+            std::cout << "Path: " << path << " Size: " <<threadInfo.stack.second << '\n';
         }
         else
         {
@@ -213,13 +213,14 @@ int add_directory(ThreadInfo &threadInfo, const std::string &path)
 {
     namespace fs = std::filesystem;
     int error = 0;
-    size_t size = 0;
+    std::uintmax_t size = 0;
 
     for (const auto &entry : fs::directory_iterator(path))
     {
         if (fs::is_symlink(entry))
         {
-            // Skip symbolic links
+            // Do not add symbolic links to stack
+            size += fs::file_size(entry.path());
             continue;
         }
 
@@ -244,7 +245,7 @@ int add_directory(ThreadInfo &threadInfo, const std::string &path)
         else
         {
             size += fs::file_size(entry.path());
-            std::cout << "Path: " << entry.path() << " size: " << size << '\n';
+            //std::cout << "Path: " << entry.path() << " size: " << size << '\n';
         }
     }
 
@@ -259,28 +260,44 @@ int add_directory(ThreadInfo &threadInfo, const std::string &path)
 std::pair<std::vector<std::string>, int> check_num_threads(int argc, char *argv[])
 {
     int numThreads = 1; // Default to 1 thread
+    int maxThreads = static_cast<int>(std::thread::hardware_concurrency());
     std::vector<std::string> files;
 
     // Check if the -j flag is provided and parse the number of threads and files
     for (int i = 1; i < argc; i++)
     {
-        if (std::string(argv[i]) == "-j")
+        try
         {
-            std::cout << "Num threads: " << argv[i + 1] << '\n';
-            numThreads = std::stoi(argv[++i]);
+            if (std::string(argv[i]) == "-j")
+            {
+                std::cout << "Num threads: " << argv[i + 1] << '\n';
+                numThreads = std::stoi(argv[++i]);
+                // Check if numThreads is greater than hardware concurrency
+                if (numThreads > maxThreads)
+                {
+                    std::cerr << "Number of threads exceeds hardware concurrency. Maximum supported threads: "
+                              << maxThreads << '\n';
+                    numThreads = maxThreads;
+                }
 
+            }
+            else
+            {
+                files.emplace_back(argv[i]);
+                std::cout << "File: " << argv[i] << '\n';
+            }
         }
-        else
+        catch (const std::exception& e)
         {
-            files.emplace_back(argv[i]);
-            std::cout << "File: " << argv[i] << '\n';
+            // Handle the exception (e.g., print an error message)
+            std::cerr << "Error: " << e.what() << " ,Usage: mdu -j {number of threads} {file} [files ...] " << '\n';
+            exit(EXIT_FAILURE);
         }
+
 
     }
 
     std::cout << "Number of threads: " << numThreads << '\n';
-
-
 
     // Store the values in cmdArgs
     std::pair<std::vector<std::string>, int> cmdArgs = {files, numThreads};
