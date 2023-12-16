@@ -5,10 +5,12 @@
 #include <condition_variable>
 #include <thread>
 #include <filesystem>
+#include <chrono>
 
 /*
  * Implementation of mdu,
  * a program that uses multithreading to measure disk usage.
+ * Usage: mdu -j {number of threads} {file} [files ...]
  *
  * Author: Marcus Lundqvist.
  *
@@ -29,6 +31,27 @@ typedef struct ThreadInfo
 
 
 } ThreadInfo;
+
+class Timer
+{
+private:
+    // Type aliases to make accessing nested type easier
+    using Clock = std::chrono::steady_clock;
+    using Second = std::chrono::duration<double, std::ratio<1> >;
+
+    std::chrono::time_point<Clock> m_beg { Clock::now() };
+
+public:
+    void reset()
+    {
+        m_beg = Clock::now();
+    }
+
+    double elapsed() const
+    {
+        return std::chrono::duration_cast<Second>(Clock::now() - m_beg).count();
+    }
+};
 
 /**
  * check_num_threads() - Checks for the -j flag and number of threads.
@@ -72,10 +95,6 @@ void thread_function(void *arg);
  */
 void init_threads(std::pair<std::vector<std::string>, int>& cmdArgs, ThreadInfo &threadInfo);
 
-
-
-
-
 int main(int argc, char *argv[])
 {
     // Init the threadInfo struct
@@ -83,8 +102,12 @@ int main(int argc, char *argv[])
 
     // Get the number of threads to use
     std::pair<std::vector<std::string>, int> cmdArgs{check_num_threads(argc, argv)};
+    //Start Timer
+    Timer t;
     // Start threads
     init_threads(cmdArgs, threadInfo);
+    // Print time
+    std::cout << "Time elapsed: " << t.elapsed() << " seconds\n";
     // Check if an error occurred
     int exit_value = threadInfo.error;
 
